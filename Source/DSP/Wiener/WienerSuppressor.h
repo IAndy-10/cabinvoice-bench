@@ -1,6 +1,8 @@
 #pragma once
 
 #include "../STFT/STFTEngine.h"
+#include <algorithm>
+#include <cmath>
 #include <complex>
 #include <vector>
 
@@ -8,12 +10,18 @@
 /// Ephraim & Malah (1984). Noise floor updated during VAD-silence frames.
 ///
 /// G(k) = SNR_priori(k) / (1 + SNR_priori(k))
-/// SNR_priori(k) = alpha * (|X_prev(k)|^2 / noise_var(k)) + (1 - alpha) * max(SNR_post(k) - 1, 0)
+/// SNR_priori(k) = alpha * (|S_prev(k)|^2 / noise_var(k)) + (1 - alpha) * max(SNR_post(k) - 1, 0)
+///
+/// Suppression strength s in [0, 1] softens the applied gain to G(k)^s
+/// (s = 1: full Wiener, s = 0: unity gain, STFT latency kept). The DD estimator
+/// always uses the full-strength clean-speech estimate S_prev = G * X, so the
+/// SNR tracking is identical at every strength; only the output changes.
 class WienerSuppressor {
 public:
     struct Config {
         float alpha     = 0.98f;  // DD smoothing
         float gainFloor = 0.05f;  // -26 dB minimum gain
+        float strength  = 1.0f;   // exponent on the applied gain
     };
 
     void prepare(size_t numBins, Config cfg) {
@@ -26,6 +34,7 @@ public:
     }
 
     void setConfig(Config cfg) { _config = cfg; }
+    void setStrength(float s) noexcept { _config.strength = std::clamp(s, 0.0f, 1.0f); }
 
     /// Process one STFT frame in-place. Called from STFTEngine's spectral callback.
     void process(std::complex<float>* bins, size_t numBins, bool isSpeech) {
@@ -52,8 +61,11 @@ public:
             float gain = _snrPriori[k] / (1.0f + _snrPriori[k]);
             gain = std::max(gain, _config.gainFloor);
 
-            bins[k] *= gain;
-            _prevMagnitude[k] = std::abs(bins[k]);
+            _prevMagnitude[k] = gain * mag;   // full-strength estimate for DD
+
+            const float applied = (_config.strength >= 1.0f) ? gain
+                                : std::pow(gain, _config.strength);
+            bins[k] *= applied;
         }
 
         if (!isSpeech)
