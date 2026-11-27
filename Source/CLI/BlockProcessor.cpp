@@ -1,4 +1,4 @@
-/// Offline CLI block processor for Clean Ears.
+/// Offline CLI block processor for CabinVoice Bench.
 ///
 /// Runs a 48 kHz WAV through the same DSP objects the plugin uses, in host-sized
 /// blocks, and writes a latency-aligned output WAV (sample n of the output
@@ -10,7 +10,7 @@
 /// behaviour with zero inference delay.
 ///
 /// Usage:
-///   clean-ears-cli --mode <bypass|wiener|rnnoise|whisper-tuned>
+///   cabinvoice-bench-cli --mode <bypass|wiener|rnnoise|whisper-tuned>
 ///                  --input in.wav --output out.wav
 ///                  [--strength 0..1]        Wiener applied gain = G^strength (default 1)
 ///                  [--vad-model path.onnx]  default: models/silero_vad.onnx
@@ -188,7 +188,7 @@ int main(int argc, char* argv[])
         return 1;
     }
     if (reader->sampleRate != kRequiredRate) {
-        std::cerr << "Error: input is " << reader->sampleRate << " Hz; clean-ears-cli needs "
+        std::cerr << "Error: input is " << reader->sampleRate << " Hz; cabinvoice-bench-cli needs "
                   << kRequiredRate << " Hz. Resample upstream (zero-phase), e.g. "
                      "scipy.signal.resample_poly.\n";
         return 1;

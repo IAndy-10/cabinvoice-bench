@@ -4,7 +4,7 @@
 #include "PluginEditor.h"
 #include <cmath>
 
-CleanEarsAudioProcessor::CleanEarsAudioProcessor()
+CabinVoiceBenchAudioProcessor::CabinVoiceBenchAudioProcessor()
     : AudioProcessor(
           BusesProperties()
               .withInput("Input",  juce::AudioChannelSet::mono(), true)
@@ -20,18 +20,18 @@ CleanEarsAudioProcessor::CleanEarsAudioProcessor()
 /// Message thread. First existing candidate wins:
 ///   1. next to the binary (Standalone: Contents/MacOS; plugins: inside the bundle)
 ///   2. the bundle's Resources folder
-///   3. ~/Library/Application Support/Clean Ears/
+///   3. ~/Library/Application Support/CabinVoice Bench/
 ///   4. the source tree's models/ (dev builds; set by CMake)
-juce::File CleanEarsAudioProcessor::findVadModel()
+juce::File CabinVoiceBenchAudioProcessor::findVadModel()
 {
     const auto exe = juce::File::getSpecialLocation(juce::File::currentExecutableFile);
     const juce::File candidates[] = {
         exe.getSiblingFile("silero_vad.onnx"),
         exe.getParentDirectory().getSiblingFile("Resources").getChildFile("silero_vad.onnx"),
         juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-            .getChildFile("Clean Ears").getChildFile("silero_vad.onnx"),
-       #ifdef CLEAN_EARS_DEV_MODEL_PATH
-        juce::File(CLEAN_EARS_DEV_MODEL_PATH),
+            .getChildFile("CabinVoice Bench").getChildFile("silero_vad.onnx"),
+       #ifdef CABINVOICE_BENCH_DEV_MODEL_PATH
+        juce::File(CABINVOICE_BENCH_DEV_MODEL_PATH),
        #endif
     };
     for (const auto& f : candidates)
@@ -40,23 +40,23 @@ juce::File CleanEarsAudioProcessor::findVadModel()
     return {};
 }
 
-CleanEarsAudioProcessor::~CleanEarsAudioProcessor()
+CabinVoiceBenchAudioProcessor::~CabinVoiceBenchAudioProcessor()
 {
     _vad.stop();
 }
 
-const juce::String CleanEarsAudioProcessor::getName() const { return JucePlugin_Name; }
-bool CleanEarsAudioProcessor::acceptsMidi()  const { return false; }
-bool CleanEarsAudioProcessor::producesMidi() const { return false; }
-bool CleanEarsAudioProcessor::isMidiEffect() const { return false; }
-double CleanEarsAudioProcessor::getTailLengthSeconds() const { return 0.0; }
-int CleanEarsAudioProcessor::getNumPrograms() { return 1; }
-int CleanEarsAudioProcessor::getCurrentProgram() { return 0; }
-void CleanEarsAudioProcessor::setCurrentProgram(int) {}
-const juce::String CleanEarsAudioProcessor::getProgramName(int) { return {}; }
-void CleanEarsAudioProcessor::changeProgramName(int, const juce::String&) {}
+const juce::String CabinVoiceBenchAudioProcessor::getName() const { return JucePlugin_Name; }
+bool CabinVoiceBenchAudioProcessor::acceptsMidi()  const { return false; }
+bool CabinVoiceBenchAudioProcessor::producesMidi() const { return false; }
+bool CabinVoiceBenchAudioProcessor::isMidiEffect() const { return false; }
+double CabinVoiceBenchAudioProcessor::getTailLengthSeconds() const { return 0.0; }
+int CabinVoiceBenchAudioProcessor::getNumPrograms() { return 1; }
+int CabinVoiceBenchAudioProcessor::getCurrentProgram() { return 0; }
+void CabinVoiceBenchAudioProcessor::setCurrentProgram(int) {}
+const juce::String CabinVoiceBenchAudioProcessor::getProgramName(int) { return {}; }
+void CabinVoiceBenchAudioProcessor::changeProgramName(int, const juce::String&) {}
 
-bool CleanEarsAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
+bool CabinVoiceBenchAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
     const auto& mainOut = layouts.getMainOutputChannelSet();
     const auto& mainIn  = layouts.getMainInputChannelSet();
@@ -68,7 +68,7 @@ bool CleanEarsAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts)
     return mainOut == mainIn;
 }
 
-void CleanEarsAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+void CabinVoiceBenchAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     juce::ignoreUnused(samplesPerBlock);
 
@@ -82,7 +82,7 @@ void CleanEarsAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlo
     const auto modelFile = findVadModel();
     std::string vadError;
     if (!_vad.prepare(sampleRate, modelFile.getFullPathName().toStdString(), vadError))
-        DBG("Clean Ears: VAD disabled: " << vadError);   // message thread
+        DBG("CabinVoice Bench: VAD disabled: " << vadError);   // message thread
 
     _smoothedInputGain.reset(sampleRate, 0.01);
     _smoothedOutputGain.reset(sampleRate, 0.01);
@@ -93,12 +93,12 @@ void CleanEarsAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlo
     setLatencySamples(0);
 }
 
-void CleanEarsAudioProcessor::releaseResources()
+void CabinVoiceBenchAudioProcessor::releaseResources()
 {
     _vad.stop();
 }
 
-void CleanEarsAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
+void CabinVoiceBenchAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                             juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -205,28 +205,28 @@ void CleanEarsAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         buffer.copyFrom(ch, 0, buffer, 0, 0, static_cast<int>(numSamples));
 }
 
-bool CleanEarsAudioProcessor::hasEditor() const { return true; }
+bool CabinVoiceBenchAudioProcessor::hasEditor() const { return true; }
 
-juce::AudioProcessorEditor* CleanEarsAudioProcessor::createEditor()
+juce::AudioProcessorEditor* CabinVoiceBenchAudioProcessor::createEditor()
 {
-    return new CleanEarsAudioProcessorEditor(*this);
+    return new CabinVoiceBenchAudioProcessorEditor(*this);
 }
 
-void CleanEarsAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
+void CabinVoiceBenchAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
     copyXmlToBinary(*xml, destData);
 }
 
-void CleanEarsAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
+void CabinVoiceBenchAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
     if (xmlState && xmlState->hasTagName(apvts.state.getType()))
         apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
 }
 
-void CleanEarsAudioProcessor::handleAsyncUpdate()
+void CabinVoiceBenchAudioProcessor::handleAsyncUpdate()
 {
     const int latency = _pendingLatency.load(std::memory_order_relaxed);
     if (latency >= 0)
@@ -235,5 +235,5 @@ void CleanEarsAudioProcessor::handleAsyncUpdate()
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new CleanEarsAudioProcessor();
+    return new CabinVoiceBenchAudioProcessor();
 }

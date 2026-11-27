@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluation pipeline for Clean Ears speech enhancement.
+"""Evaluation pipeline for CabinVoice Bench speech enhancement.
 
 Measures PESQ, STOI, and WER (via Whisper + jiwer) across enhancement modes
 on the VoiceBank+DEMAND test set or any directory of noisy/clean WAV pairs.
@@ -282,7 +282,7 @@ def parse_mode_path_pairs(raw: list[str]) -> dict[str, Path]:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Evaluate Clean Ears speech enhancement across modes. "
+            "Evaluate CabinVoice Bench speech enhancement across modes. "
             "Measures PESQ, STOI, and WER (Whisper + jiwer)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

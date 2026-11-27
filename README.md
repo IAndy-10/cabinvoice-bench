@@ -1,9 +1,9 @@
-# Clean Ears
+# CabinVoice Bench
 
 Real-time, single-microphone speech enhancement front-end for in-car voice assistants, and a measurement harness that follows each front-end choice from the microphone to the recognizer and the turn-taking decision.
 
 ```
-Mic ─► [ Clean Ears: Bypass | Wiener (strength s) | RNNoise ] ─► ASR (Whisper) ─► transcript
+Mic ─► [ CabinVoice Bench: Bypass | Wiener (strength s) | RNNoise ] ─► ASR (Whisper) ─► transcript
                      │                                   │
                DNSMOS P.835 · PESQ · STOI           WER ± 95% CI
                measured latency · block time        false VAD triggers/min (turn-taking)
@@ -15,7 +15,7 @@ Mic ─► [ Clean Ears: Bypass | Wiener (strength s) | RNNoise ] ─► ASR (Wh
 
 Noise suppression is usually tuned for human listeners. Voice assistants fail on machine decisions: road noise trips the VAD (a false barge-in or wake), and a suppressor that sounds cleaner can remove detail the recognizer needs. Chondhekar et al. (2025) report enhancement raising semantic WER by 1.1 to 46.6 points absolute with MetricGAN+, and vendor tests (Krisp) report suppressed audio roughly doubling Whisper's WER while helping the VAD.
 
-The working hypothesis is that **a voice front-end needs two different "clean" signals**: aggressive suppression for turn-taking, little or none for recognition. Clean Ears measures that trade-off on recorded in-car noise and tests a split-path front-end. It is a reproducible replication and extension of a known effect, not a new discovery.
+The working hypothesis is that **a voice front-end needs two different "clean" signals**: aggressive suppression for turn-taking, little or none for recognition. CabinVoice Bench measures that trade-off on recorded in-car noise and tests a split-path front-end. It is a reproducible replication and extension of a known effect, not a new discovery.
 
 ## Modes
 
@@ -58,7 +58,7 @@ The VAD is a side-chain: audio never passes through it, and inference never runs
 
 ```bash
 brew install onnxruntime          # macOS; elsewhere pass -DONNXRUNTIME_ROOT=<prefix>
-cd clean-ears
+cd cabinvoice-bench
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(sysctl -n hw.ncpu)
 ctest --test-dir build --output-on-failure
@@ -69,18 +69,18 @@ ctest --test-dir build --output-on-failure
 ONNX Runtime is found locally rather than downloaded: the `microsoft/onnxruntime` GitHub release URLs stopped resolving in Nov 2026.
 
 **Targets:**
-- `CleanEars`: Standalone, VST3, AU
-- `CleanEarsCLI`: offline WAV processor used by the eval harness
+- `CabinVoiceBench`: Standalone, VST3, AU
+- `CabinVoiceBenchCLI`: offline WAV processor used by the eval harness
 - `TestSTFT`, `TestLatency`, `TestSileroVAD`: run by `ctest`
 
 ### VAD model
 
-The Silero VAD v5 model ships in `models/silero_vad.onnx` (MIT). The plugin looks for it, in order: next to the binary, in the bundle's `Resources/`, in `~/Library/Application Support/Clean Ears/`, then in the source tree (dev builds). If it is missing the plugin still runs, shows "VAD off" in the editor, and the Wiener noise floor never updates.
+The Silero VAD v5 model ships in `models/silero_vad.onnx` (MIT). The plugin looks for it, in order: next to the binary, in the bundle's `Resources/`, in `~/Library/Application Support/CabinVoice Bench/`, then in the source tree (dev builds). If it is missing the plugin still runs, shows "VAD off" in the editor, and the Wiener noise floor never updates.
 
 ## Offline CLI
 
 ```bash
-./build/CleanEarsCLI_artefacts/Release/CleanEarsCLI \
+./build/CabinVoiceBenchCLI_artefacts/Release/CabinVoiceBenchCLI \
     --mode wiener --strength 0.5 \
     --input noisy_48k.wav --output out/wiener_s0.5/noisy.wav \
     --vad-events out/wiener_s0.5/noisy.vad.json
@@ -114,14 +114,14 @@ The Silero VAD v5 model ships in `models/silero_vad.onnx` (MIT). The plugin look
 | Wiener + strength, RNNoise (48 kHz guard, measured latency) | Done; latency test passes |
 | Silero VAD v5 (worker thread, anti-aliased downsampler) | Done; model test passes |
 | JUCE plugin (Standalone, VST3, AU) | Being rebuilt after the VAD/parameter changes; pluginval pending |
-| `CleanEarsCLI` (latency-aligned, VAD-gated, VAD events) | Written; build pending |
+| `CabinVoiceBenchCLI` (latency-aligned, VAD-gated, VAD events) | Written; build pending |
 | Eval harness (normalised WER + CIs, DNSMOS, noise mixing) | Next |
 | In-car noise experiment, split path | Planned |
 
 ## Project structure
 
 ```
-clean-ears/
+cabinvoice-bench/
 ├── CMakeLists.txt
 ├── Source/
 │   ├── Plugin/        PluginProcessor (mode switch, strength, mono fold, metering), PluginEditor (mode, strength, VAD meter, status)

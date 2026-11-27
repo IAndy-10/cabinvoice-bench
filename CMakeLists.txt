@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(CleanEars VERSION 1.0.0)
+project(CabinVoiceBench VERSION 1.0.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -85,13 +85,13 @@ target_include_directories(rnnoise_lib
 # Plugin Definition
 # ============================================================
 
-juce_add_plugin(CleanEars
+juce_add_plugin(CabinVoiceBench
     COMPANY_NAME "Italo Rojas"
-    BUNDLE_ID "com.italorojas.CleanEars"
+    BUNDLE_ID "com.italorojas.CabinVoiceBench"
     PLUGIN_MANUFACTURER_CODE Itro
-    PLUGIN_CODE Cler
+    PLUGIN_CODE Cvbn
     FORMATS Standalone VST3 AU
-    PRODUCT_NAME "Clean Ears"
+    PRODUCT_NAME "CabinVoice Bench"
 
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
@@ -105,13 +105,13 @@ juce_add_plugin(CleanEars
     AU_MAIN_TYPE kAudioUnitType_Effect
 )
 
-juce_generate_juce_header(CleanEars)
+juce_generate_juce_header(CabinVoiceBench)
 
 # ============================================================
 # Source Files
 # ============================================================
 
-target_sources(CleanEars PRIVATE
+target_sources(CabinVoiceBench PRIVATE
     Source/Plugin/PluginProcessor.cpp
     Source/Plugin/PluginProcessor.h
     Source/Plugin/PluginEditor.cpp
@@ -134,7 +134,7 @@ target_sources(CleanEars PRIVATE
     Source/DSP/VAD/Downsampler.h
 )
 
-target_include_directories(CleanEars PRIVATE
+target_include_directories(CabinVoiceBench PRIVATE
     Source/Plugin
     Source/DSP
     Source/Parameters
@@ -144,7 +144,7 @@ target_include_directories(CleanEars PRIVATE
 # Compile Definitions & Linking
 # ============================================================
 
-target_compile_definitions(CleanEars PUBLIC
+target_compile_definitions(CabinVoiceBench PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
@@ -153,18 +153,18 @@ target_compile_definitions(CleanEars PUBLIC
 )
 
 # Dev builds find the VAD model in the source tree; shipped builds look next to
-# the binary or in ~/Library/Application Support/Clean Ears/ (see findVadModel).
-target_compile_definitions(CleanEars PRIVATE
-    CLEAN_EARS_DEV_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/silero_vad.onnx"
+# the binary or in ~/Library/Application Support/CabinVoice Bench/ (see findVadModel).
+target_compile_definitions(CabinVoiceBench PRIVATE
+    CABINVOICE_BENCH_DEV_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/silero_vad.onnx"
 )
 
 if(APPLE)
-    target_compile_options(CleanEars PRIVATE
+    target_compile_options(CabinVoiceBench PRIVATE
         -Wno-deprecated-declarations
     )
 endif()
 
-target_link_libraries(CleanEars PRIVATE
+target_link_libraries(CabinVoiceBench PRIVATE
     onnxruntime
     rnnoise_lib
     juce::juce_audio_utils
@@ -181,30 +181,30 @@ PUBLIC
 # CLI Block Processor (offline evaluation tool)
 # ============================================================
 
-juce_add_console_app(CleanEarsCLI
-    PRODUCT_NAME "clean-ears-cli"
+juce_add_console_app(CabinVoiceBenchCLI
+    PRODUCT_NAME "cabinvoice-bench-cli"
     COMPANY_NAME "Italo Rojas"
 )
 
-target_sources(CleanEarsCLI PRIVATE
+target_sources(CabinVoiceBenchCLI PRIVATE
     Source/CLI/BlockProcessor.cpp
     Source/DSP/RNNoise/RNNoiseWrapper.cpp
     Source/DSP/VAD/SileroModel.cpp
 )
 
-target_include_directories(CleanEarsCLI PRIVATE
+target_include_directories(CabinVoiceBenchCLI PRIVATE
     Source/DSP
     Source/Parameters
 )
 
-target_compile_definitions(CleanEarsCLI PRIVATE
+target_compile_definitions(CabinVoiceBenchCLI PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
     JUCE_REPORT_APP_USAGE=0
 )
 
-target_link_libraries(CleanEarsCLI PRIVATE
+target_link_libraries(CabinVoiceBenchCLI PRIVATE
     onnxruntime
     rnnoise_lib
     juce::juce_audio_formats

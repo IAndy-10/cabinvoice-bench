@@ -8,7 +8,7 @@
 #include "../DSP/VAD/SileroVAD.h"
 #include <atomic>
 
-class CleanEarsAudioProcessor final : public juce::AudioProcessor,
+class CabinVoiceBenchAudioProcessor final : public juce::AudioProcessor,
                                       private juce::AsyncUpdater {
 public:
     enum class SuppressorMode {
@@ -17,8 +17,8 @@ public:
         RNNoise
     };
 
-    CleanEarsAudioProcessor();
-    ~CleanEarsAudioProcessor() override;
+    CabinVoiceBenchAudioProcessor();
+    ~CabinVoiceBenchAudioProcessor() override;
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -81,5 +81,5 @@ private:
     std::atomic<int> _pendingLatency{-1};
     void handleAsyncUpdate() override;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CleanEarsAudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CabinVoiceBenchAudioProcessor)
 };

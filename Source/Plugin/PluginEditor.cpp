@@ -1,7 +1,7 @@
 #include "PluginEditor.h"
 #include "../Parameters/ParameterIDs.h"
 
-CleanEarsAudioProcessorEditor::CleanEarsAudioProcessorEditor(CleanEarsAudioProcessor& p)
+CabinVoiceBenchAudioProcessorEditor::CabinVoiceBenchAudioProcessorEditor(CabinVoiceBenchAudioProcessor& p)
     : AudioProcessorEditor(&p), processorRef(p)
 {
     modeSelector.addItemList({ "Bypass", "Wiener", "RNNoise" }, 1);
@@ -21,7 +21,7 @@ CleanEarsAudioProcessorEditor::CleanEarsAudioProcessorEditor(CleanEarsAudioProce
     startTimerHz(30);
 }
 
-void CleanEarsAudioProcessorEditor::timerCallback()
+void CabinVoiceBenchAudioProcessorEditor::timerCallback()
 {
     vadProbability = processorRef.getVadProbability();
     speech = processorRef.isSpeechActive();
@@ -29,12 +29,12 @@ void CleanEarsAudioProcessorEditor::timerCallback()
     repaint(getLocalBounds().removeFromBottom(70));
 }
 
-void CleanEarsAudioProcessorEditor::paint(juce::Graphics& g)
+void CabinVoiceBenchAudioProcessorEditor::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(0xff1e1f22));
     g.setColour(juce::Colours::white);
     g.setFont(18.0f);
-    g.drawText("Clean Ears", getLocalBounds().removeFromTop(40), juce::Justification::centred);
+    g.drawText("CabinVoice Bench", getLocalBounds().removeFromTop(40), juce::Justification::centred);
 
     auto status = getLocalBounds().reduced(20).removeFromBottom(60);
 
@@ -64,7 +64,7 @@ void CleanEarsAudioProcessorEditor::paint(juce::Graphics& g)
     g.drawText(msg, status.removeFromTop(24), juce::Justification::centredLeft);
 }
 
-void CleanEarsAudioProcessorEditor::resized()
+void CabinVoiceBenchAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds().reduced(20);
     area.removeFromTop(30);

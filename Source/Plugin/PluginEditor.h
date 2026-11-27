@@ -2,11 +2,11 @@
 
 #include "PluginProcessor.h"
 
-class CleanEarsAudioProcessorEditor final : public juce::AudioProcessorEditor,
-                                            private juce::Timer {
+class CabinVoiceBenchAudioProcessorEditor final : public juce::AudioProcessorEditor,
+                                                  private juce::Timer {
 public:
-    explicit CleanEarsAudioProcessorEditor(CleanEarsAudioProcessor&);
-    ~CleanEarsAudioProcessorEditor() override = default;
+    explicit CabinVoiceBenchAudioProcessorEditor(CabinVoiceBenchAudioProcessor&);
+    ~CabinVoiceBenchAudioProcessorEditor() override = default;
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -14,7 +14,7 @@ public:
 private:
     void timerCallback() override;
 
-    CleanEarsAudioProcessor& processorRef;
+    CabinVoiceBenchAudioProcessor& processorRef;
 
     juce::ComboBox modeSelector;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAttachment;
@@ -28,5 +28,5 @@ private:
     bool speech = false;
     float level = 0.0f;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CleanEarsAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CabinVoiceBenchAudioProcessorEditor)
 };
