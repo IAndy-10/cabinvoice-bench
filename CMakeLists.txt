@@ -24,34 +24,35 @@ FetchContent_MakeAvailable(JUCE)
 # ONNX Runtime
 # ============================================================
 
-set(ONNXRUNTIME_VERSION "1.17.1")
+# The microsoft/onnxruntime GitHub release URLs no longer resolve (404 as of
+# 2026-11), so ORT is taken from a local install instead of FetchContent.
+#   macOS:  brew install onnxruntime
+#   other:  extract an ORT package and pass -DONNXRUNTIME_ROOT=<dir>
+# <dir> must contain include/ (or include/onnxruntime/) and lib/.
 
-if(APPLE)
-    set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-osx-universal2-${ONNXRUNTIME_VERSION}.tgz")
-elseif(WIN32)
-    set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-win-x64-${ONNXRUNTIME_VERSION}.zip")
-else()
-    set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}.tgz")
-endif()
+set(ONNXRUNTIME_ROOT "" CACHE PATH "ONNX Runtime install prefix")
 
-FetchContent_Declare(
-    onnxruntime
-    URL ${ONNXRUNTIME_URL}
+find_path(ONNXRUNTIME_INCLUDE_DIR onnxruntime_cxx_api.h
+    HINTS ${ONNXRUNTIME_ROOT} /opt/homebrew/opt/onnxruntime /usr/local/opt/onnxruntime /usr/local /usr
+    PATH_SUFFIXES include/onnxruntime include
+)
+find_library(ONNXRUNTIME_LIBRARY onnxruntime
+    HINTS ${ONNXRUNTIME_ROOT} /opt/homebrew/opt/onnxruntime /usr/local/opt/onnxruntime /usr/local /usr
+    PATH_SUFFIXES lib lib64
 )
 
-FetchContent_MakeAvailable(onnxruntime)
+if(NOT ONNXRUNTIME_INCLUDE_DIR OR NOT ONNXRUNTIME_LIBRARY)
+    message(FATAL_ERROR
+        "ONNX Runtime not found. macOS: `brew install onnxruntime`. "
+        "Otherwise set -DONNXRUNTIME_ROOT=<prefix>.")
+endif()
+message(STATUS "ONNX Runtime: ${ONNXRUNTIME_LIBRARY}")
 
 add_library(onnxruntime SHARED IMPORTED)
 set_target_properties(onnxruntime PROPERTIES
-    IMPORTED_LOCATION "${onnxruntime_SOURCE_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}onnxruntime${CMAKE_SHARED_LIBRARY_SUFFIX}"
-    INTERFACE_INCLUDE_DIRECTORIES "${onnxruntime_SOURCE_DIR}/include"
+    IMPORTED_LOCATION "${ONNXRUNTIME_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_INCLUDE_DIR}"
 )
-
-if(APPLE)
-    set_target_properties(onnxruntime PROPERTIES
-        IMPORTED_LOCATION "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.dylib"
-    )
-endif()
 
 # ============================================================
 # RNNoise
@@ -126,8 +127,11 @@ target_sources(CleanEars PRIVATE
     Source/DSP/Wiener/WienerSuppressor.h
     Source/DSP/RNNoise/RNNoiseWrapper.h
     Source/DSP/RNNoise/RNNoiseWrapper.cpp
+    Source/DSP/VAD/SileroModel.h
+    Source/DSP/VAD/SileroModel.cpp
     Source/DSP/VAD/SileroVAD.h
     Source/DSP/VAD/SileroVAD.cpp
+    Source/DSP/VAD/Downsampler.h
 )
 
 target_include_directories(CleanEars PRIVATE
@@ -146,6 +150,12 @@ target_compile_definitions(CleanEars PUBLIC
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
     JUCE_REPORT_APP_USAGE=0
+)
+
+# Dev builds find the VAD model in the source tree; shipped builds look next to
+# the binary or in ~/Library/Application Support/Clean Ears/ (see findVadModel).
+target_compile_definitions(CleanEars PRIVATE
+    CLEAN_EARS_DEV_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/silero_vad.onnx"
 )
 
 if(APPLE)
@@ -179,6 +189,7 @@ juce_add_console_app(CleanEarsCLI
 target_sources(CleanEarsCLI PRIVATE
     Source/CLI/BlockProcessor.cpp
     Source/DSP/RNNoise/RNNoiseWrapper.cpp
+    Source/DSP/VAD/SileroModel.cpp
 )
 
 target_include_directories(CleanEarsCLI PRIVATE
@@ -194,18 +205,40 @@ target_compile_definitions(CleanEarsCLI PRIVATE
 )
 
 target_link_libraries(CleanEarsCLI PRIVATE
+    onnxruntime
     rnnoise_lib
     juce::juce_audio_formats
     juce::juce_dsp
     juce::juce_core
-    juce::juce_gui_basics
     juce::juce_recommended_config_flags
 )
 
 # ============================================================
-# Tests
+# Tests  (run all with: ctest --test-dir build --output-on-failure)
 # ============================================================
+
+enable_testing()
 
 add_executable(TestSTFT Tests/TestSTFTPerfectReconstruction.cpp)
 target_include_directories(TestSTFT PRIVATE Source/DSP)
 target_link_libraries(TestSTFT PRIVATE juce::juce_dsp)
+add_test(NAME STFTPerfectReconstruction COMMAND TestSTFT)
+
+# Measures each mode's end-to-end delay and checks it equals the reported latency.
+add_executable(TestLatency
+    Tests/TestLatency.cpp
+    Source/DSP/RNNoise/RNNoiseWrapper.cpp
+)
+target_include_directories(TestLatency PRIVATE Source/DSP)
+target_link_libraries(TestLatency PRIVATE rnnoise_lib juce::juce_dsp)
+add_test(NAME ModeLatency COMMAND TestLatency)
+
+# Loads the shipped Silero v5 model and checks it runs and separates silence from tone/noise.
+add_executable(TestSileroVAD
+    Tests/TestSileroVAD.cpp
+    Source/DSP/VAD/SileroModel.cpp
+)
+target_include_directories(TestSileroVAD PRIVATE Source/DSP)
+target_link_libraries(TestSileroVAD PRIVATE onnxruntime)
+add_test(NAME SileroVADModel
+    COMMAND TestSileroVAD "${CMAKE_CURRENT_SOURCE_DIR}/models/silero_vad.onnx")
