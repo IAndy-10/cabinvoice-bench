@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(CleanEars VERSION 1.0.0)
+project(CabinVoiceBench VERSION 1.0.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,45 +24,74 @@ FetchContent_MakeAvailable(JUCE)
 # ONNX Runtime
 # ============================================================
 
-set(ONNXRUNTIME_VERSION "1.17.1")
+# The microsoft/onnxruntime GitHub release URLs no longer resolve (404 as of
+# 2026-11), so ORT is taken from a local install instead of FetchContent.
+#   macOS:  brew install onnxruntime
+#   other:  extract an ORT package and pass -DONNXRUNTIME_ROOT=<dir>
+# <dir> must contain include/ (or include/onnxruntime/) and lib/.
 
-if(APPLE)
-    set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-osx-universal2-${ONNXRUNTIME_VERSION}.tgz")
-elseif(WIN32)
-    set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-win-x64-${ONNXRUNTIME_VERSION}.zip")
-else()
-    set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}.tgz")
-endif()
+set(ONNXRUNTIME_ROOT "" CACHE PATH "ONNX Runtime install prefix")
 
-FetchContent_Declare(
-    onnxruntime
-    URL ${ONNXRUNTIME_URL}
+find_path(ONNXRUNTIME_INCLUDE_DIR onnxruntime_cxx_api.h
+    HINTS ${ONNXRUNTIME_ROOT} /opt/homebrew/opt/onnxruntime /usr/local/opt/onnxruntime /usr/local /usr
+    PATH_SUFFIXES include/onnxruntime include
+)
+find_library(ONNXRUNTIME_LIBRARY onnxruntime
+    HINTS ${ONNXRUNTIME_ROOT} /opt/homebrew/opt/onnxruntime /usr/local/opt/onnxruntime /usr/local /usr
+    PATH_SUFFIXES lib lib64
 )
 
-FetchContent_MakeAvailable(onnxruntime)
+if(NOT ONNXRUNTIME_INCLUDE_DIR OR NOT ONNXRUNTIME_LIBRARY)
+    message(FATAL_ERROR
+        "ONNX Runtime not found. macOS: `brew install onnxruntime`. "
+        "Otherwise set -DONNXRUNTIME_ROOT=<prefix>.")
+endif()
+message(STATUS "ONNX Runtime: ${ONNXRUNTIME_LIBRARY}")
 
 add_library(onnxruntime SHARED IMPORTED)
 set_target_properties(onnxruntime PROPERTIES
-    IMPORTED_LOCATION "${onnxruntime_SOURCE_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}onnxruntime${CMAKE_SHARED_LIBRARY_SUFFIX}"
-    INTERFACE_INCLUDE_DIRECTORIES "${onnxruntime_SOURCE_DIR}/include"
+    IMPORTED_LOCATION "${ONNXRUNTIME_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_INCLUDE_DIR}"
 )
 
-if(APPLE)
-    set_target_properties(onnxruntime PROPERTIES
-        IMPORTED_LOCATION "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.dylib"
-    )
-endif()
+# ============================================================
+# RNNoise
+# ============================================================
+
+FetchContent_Declare(
+    rnnoise
+    GIT_REPOSITORY https://github.com/xiph/rnnoise.git
+    GIT_TAG v0.1.1
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(rnnoise)
+
+# Build RNNoise as a static library from sources (v0.2 branch has simpler layout)
+add_library(rnnoise_lib STATIC
+    "${rnnoise_SOURCE_DIR}/src/denoise.c"
+    "${rnnoise_SOURCE_DIR}/src/rnn.c"
+    "${rnnoise_SOURCE_DIR}/src/rnn_data.c"
+    "${rnnoise_SOURCE_DIR}/src/kiss_fft.c"
+    "${rnnoise_SOURCE_DIR}/src/pitch.c"
+    "${rnnoise_SOURCE_DIR}/src/celt_lpc.c"
+)
+target_include_directories(rnnoise_lib
+    PUBLIC "${rnnoise_SOURCE_DIR}/include"
+    PRIVATE "${rnnoise_SOURCE_DIR}/src"
+)
 
 # ============================================================
 # Plugin Definition
 # ============================================================
 
-juce_add_plugin(CleanEars
+juce_add_plugin(CabinVoiceBench
     COMPANY_NAME "Italo Rojas"
+    BUNDLE_ID "com.italorojas.CabinVoiceBench"
     PLUGIN_MANUFACTURER_CODE Itro
-    PLUGIN_CODE Cler
+    PLUGIN_CODE Cvbn
     FORMATS Standalone VST3 AU
-    PRODUCT_NAME "Clean Ears"
+    PRODUCT_NAME "CabinVoice Bench"
 
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
@@ -76,13 +105,13 @@ juce_add_plugin(CleanEars
     AU_MAIN_TYPE kAudioUnitType_Effect
 )
 
-juce_generate_juce_header(CleanEars)
+juce_generate_juce_header(CabinVoiceBench)
 
 # ============================================================
 # Source Files
 # ============================================================
 
-target_sources(CleanEars PRIVATE
+target_sources(CabinVoiceBench PRIVATE
     Source/Plugin/PluginProcessor.cpp
     Source/Plugin/PluginProcessor.h
     Source/Plugin/PluginEditor.cpp
@@ -90,9 +119,22 @@ target_sources(CleanEars PRIVATE
 
     Source/Parameters/ParameterIDs.h
     Source/Parameters/ParameterLayout.h
+
+    # DSP infrastructure (header-only)
+    Source/DSP/Common/SPSCRingBuffer.h
+    Source/DSP/Common/FIFOAdapter.h
+    Source/DSP/STFT/STFTEngine.h
+    Source/DSP/Wiener/WienerSuppressor.h
+    Source/DSP/RNNoise/RNNoiseWrapper.h
+    Source/DSP/RNNoise/RNNoiseWrapper.cpp
+    Source/DSP/VAD/SileroModel.h
+    Source/DSP/VAD/SileroModel.cpp
+    Source/DSP/VAD/SileroVAD.h
+    Source/DSP/VAD/SileroVAD.cpp
+    Source/DSP/VAD/Downsampler.h
 )
 
-target_include_directories(CleanEars PRIVATE
+target_include_directories(CabinVoiceBench PRIVATE
     Source/Plugin
     Source/DSP
     Source/Parameters
@@ -102,7 +144,7 @@ target_include_directories(CleanEars PRIVATE
 # Compile Definitions & Linking
 # ============================================================
 
-target_compile_definitions(CleanEars PUBLIC
+target_compile_definitions(CabinVoiceBench PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
@@ -110,19 +152,93 @@ target_compile_definitions(CleanEars PUBLIC
     JUCE_REPORT_APP_USAGE=0
 )
 
+# Dev builds find the VAD model in the source tree; shipped builds look next to
+# the binary or in ~/Library/Application Support/CabinVoice Bench/ (see findVadModel).
+target_compile_definitions(CabinVoiceBench PRIVATE
+    CABINVOICE_BENCH_DEV_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/silero_vad.onnx"
+)
+
 if(APPLE)
-    target_compile_options(CleanEars PRIVATE
+    target_compile_options(CabinVoiceBench PRIVATE
         -Wno-deprecated-declarations
     )
 endif()
 
-target_link_libraries(CleanEars PRIVATE
+target_link_libraries(CabinVoiceBench PRIVATE
     onnxruntime
+    rnnoise_lib
     juce::juce_audio_utils
     juce::juce_audio_processors
+    juce::juce_dsp
     juce::juce_gui_basics
 PUBLIC
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags
 )
+
+# ============================================================
+# CLI Block Processor (offline evaluation tool)
+# ============================================================
+
+juce_add_console_app(CabinVoiceBenchCLI
+    PRODUCT_NAME "cabinvoice-bench-cli"
+    COMPANY_NAME "Italo Rojas"
+)
+
+target_sources(CabinVoiceBenchCLI PRIVATE
+    Source/CLI/BlockProcessor.cpp
+    Source/DSP/RNNoise/RNNoiseWrapper.cpp
+    Source/DSP/VAD/SileroModel.cpp
+)
+
+target_include_directories(CabinVoiceBenchCLI PRIVATE
+    Source/DSP
+    Source/Parameters
+)
+
+target_compile_definitions(CabinVoiceBenchCLI PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_DISPLAY_SPLASH_SCREEN=0
+    JUCE_REPORT_APP_USAGE=0
+)
+
+target_link_libraries(CabinVoiceBenchCLI PRIVATE
+    onnxruntime
+    rnnoise_lib
+    juce::juce_audio_formats
+    juce::juce_dsp
+    juce::juce_core
+    juce::juce_recommended_config_flags
+)
+
+# ============================================================
+# Tests  (run all with: ctest --test-dir build --output-on-failure)
+# ============================================================
+
+enable_testing()
+
+add_executable(TestSTFT Tests/TestSTFTPerfectReconstruction.cpp)
+target_include_directories(TestSTFT PRIVATE Source/DSP)
+target_link_libraries(TestSTFT PRIVATE juce::juce_dsp)
+add_test(NAME STFTPerfectReconstruction COMMAND TestSTFT)
+
+# Measures each mode's end-to-end delay and checks it equals the reported latency.
+add_executable(TestLatency
+    Tests/TestLatency.cpp
+    Source/DSP/RNNoise/RNNoiseWrapper.cpp
+)
+target_include_directories(TestLatency PRIVATE Source/DSP)
+target_link_libraries(TestLatency PRIVATE rnnoise_lib juce::juce_dsp)
+add_test(NAME ModeLatency COMMAND TestLatency)
+
+# Loads the shipped Silero v5 model and checks it runs and separates silence from tone/noise.
+add_executable(TestSileroVAD
+    Tests/TestSileroVAD.cpp
+    Source/DSP/VAD/SileroModel.cpp
+)
+target_include_directories(TestSileroVAD PRIVATE Source/DSP)
+target_link_libraries(TestSileroVAD PRIVATE onnxruntime)
+add_test(NAME SileroVADModel
+    COMMAND TestSileroVAD "${CMAKE_CURRENT_SOURCE_DIR}/models/silero_vad.onnx")

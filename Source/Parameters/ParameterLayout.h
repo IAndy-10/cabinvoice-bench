@@ -13,5 +13,23 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
         juce::StringArray { "Bypass", "Wiener", "RNNoise" },
         0));
 
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        PluginParamIDs::strength,
+        "Wiener Strength",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f),
+        1.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        PluginParamIDs::inputGain,
+        "Input Gain",
+        juce::NormalisableRange<float>(-24.0f, 12.0f, 0.1f),
+        0.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        PluginParamIDs::outputGain,
+        "Output Gain",
+        juce::NormalisableRange<float>(-24.0f, 12.0f, 0.1f),
+        0.0f));
+
     return layout;
 }
