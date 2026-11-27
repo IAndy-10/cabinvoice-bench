@@ -1,213 +1,160 @@
 # Clean Ears
 
-Real-time, single-microphone speech enhancement front-end for voice agents — and a measurement harness that follows each front-end choice all the way from the microphone to the agent's decision.
+Real-time, single-microphone speech enhancement front-end for in-car voice assistants, and a measurement harness that follows each front-end choice from the microphone to the recognizer and the turn-taking decision.
 
 ```
-Mic ─► [ Clean Ears: Bypass | Wiener | RNNoise | ASR-tuned Wiener ] ─► ASR ─► Turn + intent decisions
-                          │                                            │                │
-                    PESQ · STOI · segSNR                     WER (Scribe, Whisper)   endpointing · false barge-ins · intent F1 · ECE
-                    latency · CPU
+Mic ─► [ Clean Ears: Bypass | Wiener (strength s) | RNNoise ] ─► ASR (Whisper) ─► transcript
+                     │                                   │
+               DNSMOS P.835 · PESQ · STOI           WER ± 95% CI
+               measured latency · block time        false VAD triggers/min (turn-taking)
 ```
 
-## The Question
+## The question
 
-> **Which front-end makes a voice agent decide correctly most often, and what does it cost in latency and CPU?**
+> **Which front-end makes a voice assistant hear correctly most often in car noise, and what does it cost in latency and CPU?**
 
-Noise suppression is usually tuned for human ears (PESQ, STOI). Voice agents fail on machine decisions: a TV triggers a false barge-in, noise breaks endpointing, a muffled word flips the intent. Recent work ("When De-noising Hurts", Chondhekar et al. 2025) shows enhancement can raise ASR word error rate by up to 46% because modern recognizers are already noise-robust and suppression removes detail they rely on. Clean Ears measures whether that carries through to agent-level decisions — and whether the answer differs between a cloud ASR (ElevenLabs Scribe) and a local one (Whisper).
+Noise suppression is usually tuned for human listeners. Voice assistants fail on machine decisions: road noise trips the VAD (a false barge-in or wake), and a suppressor that sounds cleaner can remove detail the recognizer needs. Chondhekar et al. (2025) report enhancement raising semantic WER by 1.1 to 46.6 points absolute with MetricGAN+, and vendor tests (Krisp) report suppressed audio roughly doubling Whisper's WER while helping the VAD.
 
-The interesting result is any row where audio quality goes up but decision accuracy goes down.
+The working hypothesis is that **a voice front-end needs two different "clean" signals**: aggressive suppression for turn-taking, little or none for recognition. Clean Ears measures that trade-off on recorded in-car noise and tests a split-path front-end. It is a reproducible replication and extension of a known effect, not a new discovery.
 
-## Suppressor Modes
+## Modes
 
-| Mode | Algorithm | Algorithmic latency | What it tests |
-|------|-----------|---------------------|---------------|
-| **Bypass** | None | 0 ms | Baseline |
-| **Wiener** | Decision-directed SNR (Ephraim & Malah 1984), α = 0.98, gain floor −26 dB | 21.3 ms | Classical DSP |
-| **RNNoise** | Hybrid DSP + GRU, 22 bands (Valin 2018), 480-sample frames | 10 ms | Neural library integration |
-| **Wiener (ASR-tuned)** | Same filter, α = 0.92, gain floor −20 dB | 21.3 ms | Front-end tuned for machines, not ears |
+| Mode | Algorithm | Latency (measured) | What it tests |
+|------|-----------|--------------------|---------------|
+| **Bypass** | None | 0 samples | Baseline |
+| **Wiener** | Decision-directed a priori SNR (Ephraim & Malah 1984), α = 0.98, gain floor −26 dB, noise floor updated only when the VAD says silence | 1023 samples = 21.31 ms | Classical DSP |
+| **Wiener, strength s** | Same filter; applied gain G^s, s ∈ [0, 1]. The SNR estimator always tracks the full-strength estimate, so only the output changes | 21.31 ms | Suppression-strength curve (WER vs s) |
+| **RNNoise** | Hybrid DSP + GRU, 22 bands (Valin 2018), 480-sample frames, 48 kHz only | 959 samples = 19.98 ms | Neural library integration |
 
-The ASR-tuned variant (CLI flag `whisper-tuned`) is deliberately less aggressive: worse PESQ/STOI, potentially lower WER. Finding where those diverge is the point.
-
-**Optional cloud reference:** ElevenLabs Voice Isolator, run offline on the same clips, as an upper bound on suppression quality (not real-time, not local).
+Latencies are measured by `Tests/TestLatency.cpp` (cross-correlation, irregular host block sizes) and must equal what each mode reports to the host. RNNoise's 959 samples are the FIFO (479) plus RNNoise's own analysis/synthesis overlap (480).
 
 ## Architecture
 
 ```
-Input (mono, 48 kHz)
+Input (48 kHz; stereo is folded to mono, output copied to all channels)
   │
-  ├──► SPSC ring ──► Worker thread: Silero VAD (ONNX Runtime, 16 kHz)
-  │                      └─► atomic speech flag + hangover
-  │                            (gates noise-floor updates; emits speech start/stop events)
+  ├──► Downsampler (8th-order Butterworth LPF @ 6.4 kHz, fractional decimation)
+  │      └─► SPSC ring ──► Worker thread: Silero VAD v5 (ONNX Runtime, 16 kHz, 32 ms chunks)
+  │                           └─► atomic probability + speech flag (300 ms hangover)
+  │                                 (gates Wiener noise-floor updates)
   │
   ├──► Mode switch
-  │      ├─ Bypass:     pass-through
-  │      ├─ Wiener:     STFT (1024-pt, sqrt-Hann, 50% overlap) ─► DD-SNR gains ─► iSTFT/OLA
-  │      ├─ RNNoise:    FIFO (480 samples) ─► rnnoise_process_frame
-  │      └─ ASR-tuned:  same STFT path, gentler Wiener parameters
+  │      ├─ Bypass:  pass-through
+  │      ├─ Wiener:  STFT (1024-pt, sqrt-Hann, 50% overlap) ─► DD-SNR gains ^ s ─► iSTFT/OLA
+  │      └─ RNNoise: FIFO (480) ─► rnnoise_process_frame   (pass-through if sr ≠ 48 kHz)
   │
-  └──► Output ─► metering (RMS, peak via atomics)
+  └──► Output gain ─► metering (RMS, peak via atomics)
 ```
 
-The VAD is a side-chain: audio never passes through it.
+The VAD is a side-chain: audio never passes through it, and inference never runs on the audio thread.
 
-**Real-time constraints enforced:**
-- No heap allocations in `processBlock` (templated callbacks, pre-allocated buffers)
-- No locks (SPSC ring buffer, atomics for the VAD flag)
-- No I/O or inference on the audio thread (ONNX runs on the worker thread)
-- Denormal flushing (`ScopedNoDenormals`)
-- Latency changes reported from the message thread (`AsyncUpdater`)
-
-ASR, turn detection and intent classification are network or model calls on text/audio *after* Clean Ears — never in the audio path.
+**Real-time constraints:**
+- No heap allocations, locks or I/O in `processBlock` (templated callbacks, pre-allocated buffers)
+- Lock-free SPSC ring and atomics between the audio and VAD threads
+- ONNX inference on a worker thread; exceptions are caught there and disable the VAD instead of terminating the host
+- `ScopedNoDenormals`; latency changes reported from the message thread (`AsyncUpdater`)
 
 ## Build
 
 ```bash
+brew install onnxruntime          # macOS; elsewhere pass -DONNXRUNTIME_ROOT=<prefix>
 cd clean-ears
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(sysctl -n hw.ncpu)
+ctest --test-dir build --output-on-failure
 ```
 
-**Requirements:** CMake 3.22+, C++17 compiler, macOS (primary) or Linux/Windows.
+**Requirements:** CMake 3.22+, a C++17 compiler, ONNX Runtime (tested with 1.32.0 from Homebrew). JUCE 8.0.4 and RNNoise v0.1.1 are fetched automatically.
 
-Dependencies are fetched automatically: JUCE 8.0.4, ONNX Runtime 1.17.1, RNNoise v0.1.1.
+ONNX Runtime is found locally rather than downloaded: the `microsoft/onnxruntime` GitHub release URLs stopped resolving in Nov 2026.
 
 **Targets:**
-- `CleanEars` — Standalone, VST3, AU (`build/CleanEars_artefacts/Release/…`)
-- `CleanEarsCLI` — offline WAV block processor
-- `TestSTFT` — perfect-reconstruction test (all gains = 1 must reproduce the input)
+- `CleanEars`: Standalone, VST3, AU
+- `CleanEarsCLI`: offline WAV processor used by the eval harness
+- `TestSTFT`, `TestLatency`, `TestSileroVAD`: run by `ctest`
 
 ### VAD model
 
-The Silero VAD model ships in `models/`. Copy it next to the executable:
+The Silero VAD v5 model ships in `models/silero_vad.onnx` (MIT). The plugin looks for it, in order: next to the binary, in the bundle's `Resources/`, in `~/Library/Application Support/Clean Ears/`, then in the source tree (dev builds). If it is missing the plugin still runs, shows "VAD off" in the editor, and the Wiener noise floor never updates.
+
+## Offline CLI
 
 ```bash
-cp models/silero_vad.onnx build/CleanEars_artefacts/Release/Standalone/
+./build/CleanEarsCLI_artefacts/Release/CleanEarsCLI \
+    --mode wiener --strength 0.5 \
+    --input noisy_48k.wav --output out/wiener_s0.5/noisy.wav \
+    --vad-events out/wiener_s0.5/noisy.vad.json
 ```
 
-Without it the plugin still runs, but the Wiener noise estimate updates continuously instead of only during silence.
+- **Same DSP as the plugin:** same objects, parameters, block size (default 512) and Silero gating. The VAD flag for a block is the decision of the last 32 ms chunk ending at or before it, i.e. the plugin with zero inference delay.
+- **Latency-aligned output:** output sample n corresponds to input sample n, with the same length, in every mode, so PESQ/STOI/segSNR are not biased against the filters.
+- **48 kHz input only.** Resample upstream with a zero-phase resampler; the eval harness does this.
+- `--vad-events` writes per-chunk probabilities and speech segments for both the input and the processed output. The output track is what a VAD placed after the filter would see (split-path analysis).
+- `--no-vad` falls back to treating the first 500 ms as noise (legacy behaviour).
+- `--mode whisper-tuned` is kept only for older result files (α = 0.92, floor −20 dB).
 
-## Evaluation
+## Evaluation (planned, see status)
 
-### Datasets
+| Layer | Metric |
+|-------|--------|
+| Audio | DNSMOS P.835 (SIG / BAK / OVRL), PESQ and STOI as legacy proxies, latency-aligned |
+| Cost | Measured algorithmic latency, mean and worst-case block time |
+| Recognition | Normalised corpus WER ± bootstrap 95% CI (Whisper, temperature 0) |
+| Turn-taking | False VAD onsets per minute on noise-only audio; onset delay on speech |
 
-| Dataset | Used for | Notes |
-|---------|----------|-------|
-| **VoiceBank+DEMAND** (Valentini-Botinhao et al. 2016) | Audio quality (PESQ, STOI, segSNR), WER | 824-utterance test set, 48 kHz, noisy/clean pairs |
-| **SLURP** (Bastianelli et al. 2020) | Decisions: intent, endpointing, false barge-ins | ~100 close-talk (`-headset`) utterances with intent labels, mixed with DEMAND noise; far-field recordings of the same sentences as a real-room condition. Audio is CC BY-NC 4.0 — downloaded locally, never committed. |
+**Conditions:** clean speech (VoiceBank+DEMAND clean set, a SLURP subset) mixed with recorded in-car noise (DEMAND `TCAR`, ETSI EG 202 396-1 vehicle noises) at controlled SNRs, the EG 202 396 approach of recorded vehicle noise plus lab speech. A real-acoustics check replays the car noise through loudspeakers while speech is recorded on a single microphone.
 
-Test conditions for the SLURP subset: stationary noise (10 dB SNR), non-stationary noise (5 and 10 dB SNR), and reverberation (simulated RIR, T60 ≈ 400 ms) — reported separately, since no mode dereverberates.
-
-### Decision layer
-
-| Decision | How it's measured |
-|----------|-------------------|
-| **Endpointing** | Pipecat Smart Turn v3 `P(complete)` on each clip; truncated clips supply the "incomplete" class. Accuracy, ECE, and median delay from true speech end to turn commit. |
-| **False barge-ins** | Noise-only and background-talker segments inserted between utterances; count speech/turn onsets per minute. |
-| **Intent** | LLM classifier over the SLURP intent set from each ASR transcript; micro-F1 on scenario and action. |
-
-### Metrics
-
-| Layer | Metric | Tool |
-|-------|--------|------|
-| Audio quality | PESQ, STOI, segmental SNR | `pesq`, `pystoi` |
-| Real-time cost | CPU %, worst-case block time, algorithmic latency | In-callback timers |
-| Recognition | WER (normalized text) | ElevenLabs Scribe v2 (batch), Whisper (local), `jiwer` |
-| Decisions | Endpointing accuracy + delay, false barge-ins/min, intent F1, ECE | Smart Turn v3, LLM intent classifier |
-
-ElevenLabs results are cached to disk per clip and mode, so each clip is only sent once.
-
-### Running it
-
-```bash
-# Download VoiceBank+DEMAND (+ reference transcripts) into eval/data/
-./eval/download_voicebank_demand.sh
-
-# Process the noisy set with each mode
-./build/CleanEarsCLI_artefacts/Release/clean-ears-cli \
-    --mode wiener --input noisy.wav --output out/wiener/noisy.wav
-
-# Score the enhanced directories
-pip install -r eval/requirements.txt
-python eval/evaluate.py \
-    --noisy-dir  eval/data/voicebank_demand/noisy_testset_wav \
-    --clean-dir  eval/data/voicebank_demand/clean_testset_wav \
-    --enhanced-dirs wiener=out/wiener whisper-tuned=out/whisper_tuned rnnoise=out/rnnoise \
-    --ref-transcripts eval/data/voicebank_demand/testset_txt \
-    --whisper-model base \
-    --output-json results/eval_results.json
-```
-
-### Headline deliverable
-
-One table, one row per mode, from audio quality through decisions — repeated for each ASR:
-
-| Mode | PESQ | STOI | WER (Scribe) | WER (Whisper) | Endpoint acc | False barge-ins/min | Intent F1 | Latency | CPU % |
-|------|------|------|--------------|---------------|--------------|---------------------|-----------|---------|-------|
-| Bypass | — | — | — | — | — | — | — | 0 ms | — |
-| Wiener | — | — | — | — | — | — | — | 21.3 ms | — |
-| RNNoise | — | — | — | — | — | — | — | 10 ms | — |
-| ASR-tuned | — | — | — | — | — | — | — | 21.3 ms | — |
-
-### Live demo
-
-A Pipecat voice agent with Clean Ears as its audio input filter, ElevenLabs for speech-to-text and text-to-speech, and the suppressor mode switchable mid-conversation.
+**Front-ends compared:** Bypass, Wiener at s ∈ {0.25, 0.5, 1}, RNNoise, and a split path (full-strength filter → VAD, Bypass or s = 0.25 → ASR).
 
 ## Status
 
 | Component | State |
 |-----------|-------|
-| STFT/OLA engine + reconstruction test | Done |
-| Wiener, ASR-tuned Wiener, RNNoise | Done |
-| JUCE plugin (Standalone, VST3, AU) | Builds; pluginval pending |
-| Silero VAD worker thread | Done |
-| `CleanEarsCLI` | Build error — being fixed |
-| Eval harness: PESQ, STOI, Whisper WER | Done |
-| Eval harness: CLI driver, segSNR | Being merged in |
-| ElevenLabs Scribe, SLURP corpus, decision layer | Planned |
-| Pipecat live demo | Planned |
+| STFT/OLA engine | Done; reconstruction and latency tests pass |
+| Wiener + strength, RNNoise (48 kHz guard, measured latency) | Done; latency test passes |
+| Silero VAD v5 (worker thread, anti-aliased downsampler) | Done; model test passes |
+| JUCE plugin (Standalone, VST3, AU) | Being rebuilt after the VAD/parameter changes; pluginval pending |
+| `CleanEarsCLI` (latency-aligned, VAD-gated, VAD events) | Written; build pending |
+| Eval harness (normalised WER + CIs, DNSMOS, noise mixing) | Next |
+| In-car noise experiment, split path | Planned |
 
-## Project Structure
+## Project structure
 
 ```
 clean-ears/
 ├── CMakeLists.txt
-├── README.md
 ├── Source/
-│   ├── Plugin/
-│   │   ├── PluginProcessor.h/cpp     # 4-mode switch, gains, metering
-│   │   └── PluginEditor.h/cpp        # Mode selector UI
-│   ├── Parameters/
-│   │   ├── ParameterIDs.h            # mode, inputGain, outputGain
-│   │   └── ParameterLayout.h         # APVTS layout
+│   ├── Plugin/        PluginProcessor (mode switch, strength, mono fold, metering), PluginEditor (mode, strength, VAD meter, status)
+│   ├── Parameters/    ParameterIDs (mode v2, strength, gains), ParameterLayout
 │   ├── DSP/
-│   │   ├── STFT/STFTEngine.h         # 1024-pt STFT/OLA, sqrt-Hann
-│   │   ├── Wiener/WienerSuppressor.h # DD-SNR, configurable alpha/gainFloor
-│   │   ├── RNNoise/RNNoiseWrapper.*  # RNNoise v0.1.1 + FIFO
-│   │   ├── VAD/SileroVAD.*           # ONNX Runtime, worker thread
-│   │   └── Common/
-│   │       ├── SPSCRingBuffer.h      # Lock-free ring buffer
-│   │       └── FIFOAdapter.h         # Variable-to-fixed block adapter
-│   └── CLI/
-│       └── BlockProcessor.cpp        # Offline WAV processor
-├── Tests/
-│   └── TestSTFTPerfectReconstruction.cpp
-├── eval/
-│   ├── download_voicebank_demand.sh
-│   ├── evaluate.py                   # PESQ / STOI / WER harness
-│   └── requirements.txt
-└── models/
-    └── silero_vad.onnx
+│   │   ├── STFT/STFTEngine.h          1024-pt STFT/OLA, sqrt-Hann
+│   │   ├── Wiener/WienerSuppressor.h  DD-SNR, gain floor, strength
+│   │   ├── RNNoise/RNNoiseWrapper.*   RNNoise v0.1.1 + FIFO, 48 kHz only
+│   │   ├── VAD/SileroModel.*          synchronous Silero v5 inference + hangover (CLI, tests, worker)
+│   │   ├── VAD/SileroVAD.*            real-time wrapper: ring + worker thread
+│   │   ├── VAD/Downsampler.h          host rate → 16 kHz, anti-aliased, RT-safe
+│   │   └── Common/                    SPSCRingBuffer, FIFOAdapter
+│   └── CLI/BlockProcessor.cpp         offline processor
+├── Tests/             TestSTFTPerfectReconstruction, TestLatency, TestSileroVAD
+├── eval/              download script, evaluate.py, requirements
+└── models/            silero_vad.onnx
 ```
 
-## Key References
+## Limitations
+
+Single microphone (no beamforming), no acoustic echo cancellation, no calibrated SPL, and in-car noise comes from public recordings rather than a vehicle under test.
+
+## Key references
 
 - Ephraim, Y. & Malah, D. (1984). "Speech Enhancement Using a Minimum Mean-Square Error Short-Time Spectral Amplitude Estimator." IEEE Trans. ASSP.
 - Valin, J.-M. (2018). "A Hybrid DSP/Deep Learning Approach to Real-Time Full-Band Speech Enhancement." IEEE MMSP.
 - Chondhekar, S. et al. (2025). "When De-noising Hurts: A Systematic Study of Speech Enhancement Effects on Modern Medical ASR Systems." arXiv:2512.17562.
+- Reddy, C. K. A., Gopal, V. & Cutler, R. (2022). "DNSMOS P.835." ICASSP.
 - Valentini-Botinhao, C. et al. (2016). "Speech Enhancement for a Noise-Robust Text-to-Speech Synthesis System." Interspeech.
+- Thiemann, J., Ito, N. & Vincent, E. (2013). "The Diverse Environments Multi-channel Acoustic Noise Database (DEMAND)."
 - Bastianelli, E. et al. (2020). "SLURP: A Spoken Language Understanding Resource Package." EMNLP.
+- ETSI EG 202 396-1: background noise simulation for speech quality testing.
 - Silero VAD: https://github.com/snakers4/silero-vad
-- Pipecat Smart Turn: https://github.com/pipecat-ai/smart-turn
 
 ## License
 
