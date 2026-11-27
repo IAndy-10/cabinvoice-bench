@@ -10,8 +10,14 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         PluginParamIDs::mode,
         "Mode",
-        juce::StringArray { "Bypass", "Wiener", "RNNoise", "Wiener (Whisper-tuned)" },
+        juce::StringArray { "Bypass", "Wiener", "RNNoise" },
         0));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        PluginParamIDs::strength,
+        "Wiener Strength",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f),
+        1.0f));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         PluginParamIDs::inputGain,

@@ -14,8 +14,7 @@ public:
     enum class SuppressorMode {
         Bypass = 0,
         Wiener,
-        RNNoise,
-        WienerWhisperTuned
+        RNNoise
     };
 
     CleanEarsAudioProcessor();
@@ -49,6 +48,8 @@ public:
     float getPeakLevel() const { return _peakLevel.load(std::memory_order_relaxed); }
     float getVadProbability() const { return _vad.getProbability(); }
     bool isSpeechActive() const { return _vad.isSpeech(); }
+    bool isVadModelLoaded() const { return _vad.isModelLoaded(); }
+    bool isRNNoiseAvailable() const { return _rnnoiseAvailable.load(std::memory_order_relaxed); }
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -56,15 +57,20 @@ private:
     std::atomic<float>* modeParam = nullptr;
     std::atomic<float>* inputGainParam = nullptr;
     std::atomic<float>* outputGainParam = nullptr;
+    std::atomic<float>* strengthParam = nullptr;
 
     STFTEngine       _stft;
     WienerSuppressor _wiener;
-    WienerSuppressor _wienerWhisperTuned;
     RNNoiseWrapper   _rnnoise;
     SileroVAD        _vad;
 
     juce::SmoothedValue<float> _smoothedInputGain;
     juce::SmoothedValue<float> _smoothedOutputGain;
+    juce::SmoothedValue<float> _smoothedStrength;
+
+    std::atomic<bool> _rnnoiseAvailable{ false };
+
+    static juce::File findVadModel();
 
     SuppressorMode _prevMode = SuppressorMode::Bypass;
 
