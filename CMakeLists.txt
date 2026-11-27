@@ -54,11 +54,39 @@ if(APPLE)
 endif()
 
 # ============================================================
+# RNNoise
+# ============================================================
+
+FetchContent_Declare(
+    rnnoise
+    GIT_REPOSITORY https://github.com/xiph/rnnoise.git
+    GIT_TAG v0.1.1
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(rnnoise)
+
+# Build RNNoise as a static library from sources (v0.2 branch has simpler layout)
+add_library(rnnoise_lib STATIC
+    "${rnnoise_SOURCE_DIR}/src/denoise.c"
+    "${rnnoise_SOURCE_DIR}/src/rnn.c"
+    "${rnnoise_SOURCE_DIR}/src/rnn_data.c"
+    "${rnnoise_SOURCE_DIR}/src/kiss_fft.c"
+    "${rnnoise_SOURCE_DIR}/src/pitch.c"
+    "${rnnoise_SOURCE_DIR}/src/celt_lpc.c"
+)
+target_include_directories(rnnoise_lib
+    PUBLIC "${rnnoise_SOURCE_DIR}/include"
+    PRIVATE "${rnnoise_SOURCE_DIR}/src"
+)
+
+# ============================================================
 # Plugin Definition
 # ============================================================
 
 juce_add_plugin(CleanEars
     COMPANY_NAME "Italo Rojas"
+    BUNDLE_ID "com.italorojas.CleanEars"
     PLUGIN_MANUFACTURER_CODE Itro
     PLUGIN_CODE Cler
     FORMATS Standalone VST3 AU
@@ -90,6 +118,16 @@ target_sources(CleanEars PRIVATE
 
     Source/Parameters/ParameterIDs.h
     Source/Parameters/ParameterLayout.h
+
+    # DSP infrastructure (header-only)
+    Source/DSP/Common/SPSCRingBuffer.h
+    Source/DSP/Common/FIFOAdapter.h
+    Source/DSP/STFT/STFTEngine.h
+    Source/DSP/Wiener/WienerSuppressor.h
+    Source/DSP/RNNoise/RNNoiseWrapper.h
+    Source/DSP/RNNoise/RNNoiseWrapper.cpp
+    Source/DSP/VAD/SileroVAD.h
+    Source/DSP/VAD/SileroVAD.cpp
 )
 
 target_include_directories(CleanEars PRIVATE
@@ -118,11 +156,56 @@ endif()
 
 target_link_libraries(CleanEars PRIVATE
     onnxruntime
+    rnnoise_lib
     juce::juce_audio_utils
     juce::juce_audio_processors
+    juce::juce_dsp
     juce::juce_gui_basics
 PUBLIC
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags
 )
+
+# ============================================================
+# CLI Block Processor (offline evaluation tool)
+# ============================================================
+
+juce_add_console_app(CleanEarsCLI
+    PRODUCT_NAME "clean-ears-cli"
+    COMPANY_NAME "Italo Rojas"
+)
+
+target_sources(CleanEarsCLI PRIVATE
+    Source/CLI/BlockProcessor.cpp
+    Source/DSP/RNNoise/RNNoiseWrapper.cpp
+)
+
+target_include_directories(CleanEarsCLI PRIVATE
+    Source/DSP
+    Source/Parameters
+)
+
+target_compile_definitions(CleanEarsCLI PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_DISPLAY_SPLASH_SCREEN=0
+    JUCE_REPORT_APP_USAGE=0
+)
+
+target_link_libraries(CleanEarsCLI PRIVATE
+    rnnoise_lib
+    juce::juce_audio_formats
+    juce::juce_dsp
+    juce::juce_core
+    juce::juce_gui_basics
+    juce::juce_recommended_config_flags
+)
+
+# ============================================================
+# Tests
+# ============================================================
+
+add_executable(TestSTFT Tests/TestSTFTPerfectReconstruction.cpp)
+target_include_directories(TestSTFT PRIVATE Source/DSP)
+target_link_libraries(TestSTFT PRIVATE juce::juce_dsp)

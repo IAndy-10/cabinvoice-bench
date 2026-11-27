@@ -4,7 +4,7 @@
 CleanEarsAudioProcessorEditor::CleanEarsAudioProcessorEditor(CleanEarsAudioProcessor& p)
     : AudioProcessorEditor(&p), processorRef(p)
 {
-    modeSelector.addItemList({ "Bypass", "Wiener", "RNNoise" }, 1);
+    modeSelector.addItemList({ "Bypass", "Wiener", "RNNoise", "Wiener (Whisper-tuned)" }, 1);
     modeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         processorRef.apvts, PluginParamIDs::mode.getParamID(), modeSelector);
 

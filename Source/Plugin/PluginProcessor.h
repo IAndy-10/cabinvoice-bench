@@ -1,10 +1,22 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_dsp/juce_dsp.h>
+#include "../DSP/STFT/STFTEngine.h"
+#include "../DSP/Wiener/WienerSuppressor.h"
+#include "../DSP/RNNoise/RNNoiseWrapper.h"
+#include "../DSP/VAD/SileroVAD.h"
+#include <atomic>
 
-class CleanEarsAudioProcessor final : public juce::AudioProcessor {
+class CleanEarsAudioProcessor final : public juce::AudioProcessor,
+                                      private juce::AsyncUpdater {
 public:
-    enum class SuppressorMode { Bypass = 0, Wiener, RNNoise };
+    enum class SuppressorMode {
+        Bypass = 0,
+        Wiener,
+        RNNoise,
+        WienerWhisperTuned
+    };
 
     CleanEarsAudioProcessor();
     ~CleanEarsAudioProcessor() override;
@@ -33,10 +45,35 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
+    float getRmsLevel() const { return _rmsLevel.load(std::memory_order_relaxed); }
+    float getPeakLevel() const { return _peakLevel.load(std::memory_order_relaxed); }
+    float getVadProbability() const { return _vad.getProbability(); }
+    bool isSpeechActive() const { return _vad.isSpeech(); }
+
     juce::AudioProcessorValueTreeState apvts;
 
 private:
     std::atomic<float>* modeParam = nullptr;
+    std::atomic<float>* inputGainParam = nullptr;
+    std::atomic<float>* outputGainParam = nullptr;
+
+    STFTEngine       _stft;
+    WienerSuppressor _wiener;
+    WienerSuppressor _wienerWhisperTuned;
+    RNNoiseWrapper   _rnnoise;
+    SileroVAD        _vad;
+
+    juce::SmoothedValue<float> _smoothedInputGain;
+    juce::SmoothedValue<float> _smoothedOutputGain;
+
+    SuppressorMode _prevMode = SuppressorMode::Bypass;
+
+    std::atomic<float> _rmsLevel{0.0f};
+    std::atomic<float> _peakLevel{0.0f};
+
+    // Deferred latency update (setLatencySamples not RT-safe)
+    std::atomic<int> _pendingLatency{-1};
+    void handleAsyncUpdate() override;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CleanEarsAudioProcessor)
 };
