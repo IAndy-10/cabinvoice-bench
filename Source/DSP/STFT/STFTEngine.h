@@ -47,7 +47,10 @@ public:
         }
     }
 
-    size_t getLatencySamples() const { return kFrameSize; }
+    /// Input sample n appears at output sample n + kFrameSize - 1: the frame
+    /// containing n is transformed on the sample that completes it, and the
+    /// output read for that same sample is the first sample of the new frame.
+    size_t getLatencySamples() const { return kFrameSize - 1; }
 
     void reset() {
         std::fill(_inputBuffer.begin(), _inputBuffer.end(), 0.0f);

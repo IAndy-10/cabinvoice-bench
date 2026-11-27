@@ -23,7 +23,9 @@ public:
     }
 
     /// Push `numSamples` from `input`, process complete frames via `callback`,
-    /// pull `numSamples` into `output`. Output is delayed by one frame (frameSize samples).
+    /// pull `numSamples` into `output`. Output is delayed by frameSize - 1 samples:
+    /// the sample that completes a frame triggers processing and is output-read
+    /// in the same iteration, so it emerges as the frame's first output sample.
     template <typename Callback>
     void process(const float* input, float* output, size_t numSamples, Callback&& callback) {
         for (size_t i = 0; i < numSamples; ++i) {
@@ -47,7 +49,7 @@ public:
         }
     }
 
-    size_t getLatencySamples() const { return _frameSize; }
+    size_t getLatencySamples() const { return _frameSize - 1; }
 
     void reset() {
         std::fill(_inputFIFO.begin(), _inputFIFO.end(), 0.0f);
